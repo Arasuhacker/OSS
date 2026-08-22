@@ -1,0 +1,68 @@
+name: Mirror public Chia release 2.7.3 source/runtime
+
+on:
+  push:
+    paths:
+      - .github/workflows/mirror-public-chia-release273.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mirror repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Publish run identifier
+        run: |
+          rm -rf /tmp/release-index
+          mkdir -p /tmp/release-index/release273-index
+          printf '%s\n' "$GITHUB_RUN_ID" > /tmp/release-index/release273-index/RUN_ID.txt
+          cd /tmp/release-index
+          git init
+          git config user.name 'public-dependency-mirror'
+          git config user.email 'actions@users.noreply.github.com'
+          git checkout -b public-release273-index
+          git add release273-index
+          git commit -m 'Publish Chia release 2.7.3 artifact index'
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin public-release273-index
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Fetch public release source and build dependency wheelhouse
+        run: |
+          python -m pip install --upgrade pip wheel
+          git clone --depth 1 --branch release/2.7.3 https://github.com/Chia-Network/chia-blockchain.git chia-release273
+          git -C chia-release273 rev-parse HEAD > RELEASE_COMMIT.txt
+          tar czf chia-release273-source.tar.gz chia-release273
+          mkdir -p release273-wheels
+          python -m pip wheel \
+            --wheel-dir release273-wheels \
+            ./chia-release273 \
+            'pytest>=8.3.3' \
+            'pytest-mock>=3.14.0' \
+            'pytest-xdist>=3.6.1' \
+            'pytest-rerunfailures>=16.1,<17.0'
+          sha256sum chia-release273-source.tar.gz release273-wheels/* > SHA256SUMS.txt
+
+      - name: Upload public release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-chia-release273-runtime
+          path: |
+            chia-release273-source.tar.gz
+            RELEASE_COMMIT.txt
+            SHA256SUMS.txt
+            release273-wheels/
+          if-no-files-found: error
