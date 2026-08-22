@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Chia-Network/chia-blockchain
-          ref: d61ed07dee7e9f846b475184db29e885f4699d2a
+          ref: release/2.7.3
           path: chia-blockchain
 
       - name: Set up Python
@@ -61,6 +61,7 @@ jobs:
         if: always()
         run: |
           {
+            echo "target_branch=release/2.7.3"
             echo "target_commit=$(git -C chia-blockchain rev-parse HEAD)"
             echo "python=$(python --version 2>&1)"
             python - <<'PY'
@@ -73,7 +74,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: isolated-results
+          name: release-2.7.3-results
           path: |
             results.log
             environment.log
