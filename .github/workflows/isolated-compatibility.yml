@@ -39,6 +39,10 @@ jobs:
       - name: Install target and test dependencies
         run: |
           python -m pip install --upgrade pip
+          # Environment-only workaround: release/2.7.3 pins yanked zstd>=1.5.7.3.
+          # Relax only that package floor so the unmodified Chia networking code can run.
+          sed -i 's/zstd = ">=1.5.7.3"/zstd = ">=1.5.7.2"/' chia-blockchain/pyproject.toml
+          grep '^zstd' chia-blockchain/pyproject.toml
           python -m pip install -e './chia-blockchain[dev]'
 
       - name: Restore isolated test
@@ -63,10 +67,14 @@ jobs:
           {
             echo "target_branch=release/2.7.3"
             echo "target_commit=$(git -C chia-blockchain rev-parse HEAD)"
+            echo "environment_only_change=zstd floor 1.5.7.3 -> 1.5.7.2"
             echo "python=$(python --version 2>&1)"
             python - <<'PY'
           import importlib.metadata
-          print(f"chia_rs={importlib.metadata.version('chia_rs')}")
+          try:
+              print(f"chia_rs={importlib.metadata.version('chia_rs')}")
+          except importlib.metadata.PackageNotFoundError:
+              print("chia_rs=not-installed")
           PY
           } | tee environment.log
 
