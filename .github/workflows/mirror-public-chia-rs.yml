@@ -1,0 +1,45 @@
+name: Mirror public chia-rs wheel
+
+on:
+  push:
+    paths:
+      - .github/workflows/mirror-public-chia-rs.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download public wheel
+        run: |
+          rm -rf public-deps
+          mkdir -p public-deps
+          python -m pip download \
+            --only-binary=:all: \
+            --no-deps \
+            --dest public-deps \
+            'chia-rs==0.47.0'
+          sha256sum public-deps/* > public-deps/SHA256SUMS.txt
+
+      - name: Publish wheel on isolated branch
+        run: |
+          git config user.name 'public-dependency-mirror'
+          git config user.email 'actions@users.noreply.github.com'
+          git checkout --orphan public-deps
+          git rm -rf .
+          git add public-deps
+          git commit -m 'Mirror public chia-rs 0.47.0 wheel'
+          git push --force origin public-deps
