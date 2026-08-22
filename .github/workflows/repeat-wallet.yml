@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Chia-Network/chia-blockchain
-          ref: d61ed07dee7e9f846b475184db29e885f4699d2a
+          ref: release/2.7.3
           path: chia-blockchain
 
       - name: Set up Python
@@ -38,6 +38,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgmp-dev
           python -m pip install --upgrade pip
+          # Environment-only workaround: release/2.7.3 pins unavailable zstd>=1.5.7.3.
+          # No Chia networking, protocol, wallet, or rate-limit source is modified.
+          sed -i 's/zstd = ">=1.5.7.3"/zstd = ">=1.5.7.2"/' chia-blockchain/pyproject.toml
+          grep '^zstd' chia-blockchain/pyproject.toml
           python -m pip install -e './chia-blockchain[dev]'
 
       - name: Restore and verify payload
@@ -60,7 +64,9 @@ jobs:
         if: always()
         run: |
           {
+            echo "target_branch=release/2.7.3"
             echo "target_commit=$(git -C chia-blockchain rev-parse HEAD)"
+            echo "environment_only_change=zstd floor 1.5.7.3 -> 1.5.7.2"
             echo "python=$(python --version 2>&1)"
             python - <<'PY'
           import importlib.metadata
@@ -72,7 +78,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: repeat-wallet-results
+          name: release-repeat-wallet-results
           path: |
             results.log
             environment.log
