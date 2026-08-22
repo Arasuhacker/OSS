@@ -1,0 +1,5 @@
+target_commit=d61ed07dee7e9f846b475184db29e885f4699d2a
+campaign_exit_code=
+payload_sha256=
+--- result markers ---
+--- tail ---
