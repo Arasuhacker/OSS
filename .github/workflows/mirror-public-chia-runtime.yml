@@ -1,0 +1,67 @@
+name: Mirror public Chia runtime wheels
+
+on:
+  push:
+    paths:
+      - .github/workflows/mirror-public-chia-runtime.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mirror repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build public dependency wheelhouse
+        run: |
+          python -m pip install --upgrade pip wheel
+          git clone --filter=blob:none https://github.com/Chia-Network/chia-blockchain.git chia-public
+          git -C chia-public checkout d61ed07dee7e9f846b475184db29e885f4699d2a
+          rm -rf public-runtime-wheels
+          mkdir -p public-runtime-wheels
+          python -m pip wheel \
+            --wheel-dir public-runtime-wheels \
+            ./chia-public \
+            'pytest>=8.3.3' \
+            'pytest-mock>=3.14.0' \
+            'pytest-xdist>=3.6.1' \
+            'pytest-rerunfailures>=16.1,<17.0'
+          sha256sum public-runtime-wheels/* > public-runtime-wheels/SHA256SUMS.txt
+          printf '%s\n' "$GITHUB_RUN_ID" > public-runtime-wheels/RUN_ID.txt
+
+      - name: Upload public runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-chia-runtime-wheels
+          path: public-runtime-wheels/
+          if-no-files-found: error
+
+      - name: Publish run identifier
+        run: |
+          run_id="$GITHUB_RUN_ID"
+          rm -rf /tmp/public-runtime-index
+          mkdir -p /tmp/public-runtime-index/runtime-deps
+          printf '%s\n' "$run_id" > /tmp/public-runtime-index/runtime-deps/RUN_ID.txt
+          cp public-runtime-wheels/SHA256SUMS.txt /tmp/public-runtime-index/runtime-deps/SHA256SUMS.txt
+          cd /tmp/public-runtime-index
+          git init
+          git config user.name 'public-dependency-mirror'
+          git config user.email 'actions@users.noreply.github.com'
+          git checkout -b public-runtime-index
+          git add runtime-deps
+          git commit -m 'Publish public Chia runtime artifact index'
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin public-runtime-index
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
