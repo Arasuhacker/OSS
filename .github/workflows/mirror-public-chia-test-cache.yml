@@ -45,7 +45,7 @@ jobs:
           gh release download -R Chia-Network/test-cache 0.45.32 --archive=tar.gz -O cache.tar.gz
           tar xzf cache.tar.gz
           cd ..
-          found=$(find cache-download -type d -path '*/.chia/test-plots' | head -n1)
+          found=$(find cache-download -type d -name test-plots | head -n1)
           test -n "$found"
           cp -a "$found"/. test-plots-public/
           printf '%s\n' "$GITHUB_RUN_ID" > test-plots-public/RUN_ID.txt
