@@ -18,6 +18,23 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Publish run identifier early
+        run: |
+          rm -rf /tmp/test-plot-index
+          mkdir -p /tmp/test-plot-index/test-plots-index
+          printf '%s\n' "$GITHUB_RUN_ID" > /tmp/test-plot-index/test-plots-index/RUN_ID.txt
+          cd /tmp/test-plot-index
+          git init
+          git config user.name 'public-dependency-mirror'
+          git config user.email 'actions@users.noreply.github.com'
+          git checkout -b public-test-plots-index
+          git add test-plots-index
+          git commit -m 'Publish Chia public test plots artifact index'
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin public-test-plots-index
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Download Chia public test cache
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -40,21 +57,3 @@ jobs:
           name: public-chia-test-plots
           path: test-plots-public/
           if-no-files-found: error
-
-      - name: Publish artifact run identifier
-        run: |
-          run_id="$GITHUB_RUN_ID"
-          rm -rf /tmp/test-plot-index
-          mkdir -p /tmp/test-plot-index/test-plots-index
-          printf '%s\n' "$run_id" > /tmp/test-plot-index/test-plots-index/RUN_ID.txt
-          cd /tmp/test-plot-index
-          git init
-          git config user.name 'public-dependency-mirror'
-          git config user.email 'actions@users.noreply.github.com'
-          git checkout -b public-test-plots-index
-          git add test-plots-index
-          git commit -m 'Publish Chia public test plots artifact index'
-          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push --force origin public-test-plots-index
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
