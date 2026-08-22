@@ -1,0 +1,77 @@
+name: isolated-compatibility-check
+
+on:
+  push:
+    branches:
+      - ci-rlv3-6f4a9d
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout harness
+        uses: actions/checkout@v4
+
+      - name: Checkout target source
+        uses: actions/checkout@v4
+        with:
+          repository: Chia-Network/chia-blockchain
+          ref: d61ed07dee7e9f846b475184db29e885f4699d2a
+          path: chia-blockchain
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: chia-blockchain/pyproject.toml
+
+      - name: Install native prerequisites
+        run: sudo apt-get update && sudo apt-get install -y libgmp-dev
+
+      - name: Install target and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e './chia-blockchain[dev]'
+
+      - name: Restore isolated test
+        run: |
+          base64 -d ci/payload.gz.b64 | gzip -dc > chia-blockchain/chia/_tests/core/server/test_isolated_compatibility.py
+          python -m py_compile chia-blockchain/chia/_tests/core/server/test_isolated_compatibility.py
+
+      - name: Execute local-only state-machine tests
+        id: execute
+        shell: bash
+        run: |
+          set -o pipefail
+          cd chia-blockchain
+          /usr/bin/time -v python -m pytest -s -vv \
+            chia/_tests/core/server/test_isolated_compatibility.py \
+            --tb=short 2>&1 | tee ../results.log
+
+      - name: Record source and environment
+        if: always()
+        run: |
+          {
+            echo "target_commit=$(git -C chia-blockchain rev-parse HEAD)"
+            echo "python=$(python --version 2>&1)"
+            python - <<'PY'
+          import chia_rs
+          print(f"chia_rs={getattr(chia_rs, '__version__', 'unknown')}")
+          PY
+          } | tee environment.log
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolated-results
+          path: |
+            results.log
+            environment.log
+            chia-blockchain/chia/_tests/core/server/test_isolated_compatibility.py
+          if-no-files-found: warn
