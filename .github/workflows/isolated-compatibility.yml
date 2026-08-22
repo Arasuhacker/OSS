@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - ci-rlv3-6f4a9d
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
