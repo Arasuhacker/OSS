@@ -1,0 +1,70 @@
+name: isolated-chia-generator-version-fuzz
+
+on:
+  push:
+    branches: [ci-rlv3-6f4a9d]
+    paths-ignore: ['ci/results/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  state-space:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ci-rlv3-6f4a9d
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install exact target
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgmp-dev libssl-dev pkg-config
+          git clone --filter=blob:none https://github.com/Chia-Network/chia-blockchain.git target
+          git -C target checkout d61ed07dee7e9f846b475184db29e885f4699d2a
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -e './target[dev]'
+      - name: Exhaust versioned generator states
+        id: campaign
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}/target
+          PYTHONUNBUFFERED: '1'
+        run: |
+          set -o pipefail
+          python ci/generator_version_state_fuzzer.py 2>&1 | tee GENERATOR_VERSION.log
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+      - name: Publish result
+        if: always()
+        run: |
+          mkdir -p ci/results
+          {
+            echo "target_commit=d61ed07dee7e9f846b475184db29e885f4699d2a"
+            echo "exit_code=${{ steps.campaign.outputs.exit_code }}"
+            grep -E 'LOCATED=|MISSING=|CASES=|ACCEPTED=|DIVERGENCES=|DIVERGENCE=|RESULT=|Traceback|ERROR' GENERATOR_VERSION.log 2>/dev/null | tail -n 220 || true
+            echo '--- tail ---'
+            tail -n 220 GENERATOR_VERSION.log 2>/dev/null || true
+          } > ci/results/generator-version-current.txt
+          cp GENERATOR_VERSION_DIVERGENCES.json ci/results/generator-version-divergences.json 2>/dev/null || true
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ci/results/generator-version-current.txt ci/results/generator-version-divergences.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Record generator version state-space result [skip ci]'
+            git push origin HEAD:ci-rlv3-6f4a9d
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: generator-version-state-evidence
+          path: |
+            GENERATOR_VERSION.log
+            GENERATOR_VERSION_CASES.json
+            GENERATOR_VERSION_DIVERGENCES.json
+            ci/results/generator-version-current.txt
+          retention-days: 7
