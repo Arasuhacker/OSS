@@ -52,7 +52,7 @@ jobs:
         run: |
           set -o pipefail
           cd chia-blockchain
-          /usr/bin/time -v python -m pytest -s -vv \
+          /usr/bin/time -v python -m pytest -s -vv -n 0 \
             chia/_tests/core/server/test_isolated_compatibility.py \
             --tb=short 2>&1 | tee ../results.log
 
@@ -63,8 +63,8 @@ jobs:
             echo "target_commit=$(git -C chia-blockchain rev-parse HEAD)"
             echo "python=$(python --version 2>&1)"
             python - <<'PY'
-          import chia_rs
-          print(f"chia_rs={getattr(chia_rs, '__version__', 'unknown')}")
+          import importlib.metadata
+          print(f"chia_rs={importlib.metadata.version('chia_rs')}")
           PY
           } | tee environment.log
 
