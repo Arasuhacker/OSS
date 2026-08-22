@@ -33,6 +33,14 @@ jobs:
             --dest public-deps \
             'chia-rs==0.47.0'
           sha256sum public-deps/* > public-deps/SHA256SUMS.txt
+          printf '%s\n' "$GITHUB_RUN_ID" > public-deps/RUN_ID.txt
+
+      - name: Upload public wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-chia-rs-wheel
+          path: public-deps/
+          if-no-files-found: error
 
       - name: Publish wheel on isolated branch
         run: |
