@@ -1,0 +1,70 @@
+name: isolated-chia-cat-conservation
+
+on:
+  push:
+    branches: [ci-rlv3-6f4a9d]
+    paths-ignore: ['ci/results/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cat-invariant-campaign:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ci-rlv3-6f4a9d
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install exact target
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgmp-dev libssl-dev pkg-config
+          git clone --filter=blob:none https://github.com/Chia-Network/chia-blockchain.git target
+          git -C target checkout d61ed07dee7e9f846b475184db29e885f4699d2a
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -e './target[dev]'
+      - name: Execute CAT conservation mutations
+        id: campaign
+        continue-on-error: true
+        timeout-minutes: 100
+        env:
+          PYTHONPATH: ${{ github.workspace }}/target
+          PYTHONUNBUFFERED: '1'
+        run: |
+          set -o pipefail
+          python ci/cat_conservation_payload_engine.py 2>&1 | tee CAT.log
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+      - name: Publish result
+        if: always()
+        run: |
+          mkdir -p ci/results
+          {
+            echo "target_commit=d61ed07dee7e9f846b475184db29e885f4699d2a"
+            echo "exit_code=${{ steps.campaign.outputs.exit_code }}"
+            grep -E 'SIGNATURE=|PROGRESS=|CONSERVATION_BREAK=|CASES=|BASELINE_ACCEPTED=|CONSERVATION_BREAKS=|RESULT=|Traceback|ERROR' CAT.log 2>/dev/null | tail -n 320 || true
+            echo '--- tail ---'
+            tail -n 240 CAT.log 2>/dev/null || true
+          } > ci/results/cat-conservation-current.txt
+          cp CAT_CONSERVATION_RESULTS.json ci/results/cat-conservation-current.json 2>/dev/null || true
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ci/results/cat-conservation-current.txt ci/results/cat-conservation-current.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Record CAT conservation campaign [skip ci]'
+            git push origin HEAD:ci-rlv3-6f4a9d
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cat-conservation-evidence
+          path: |
+            CAT.log
+            CAT_CONSERVATION_RESULTS.json
+            ci/results/cat-conservation-current.txt
+          retention-days: 7

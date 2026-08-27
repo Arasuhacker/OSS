@@ -1,0 +1,95 @@
+name: isolated-chia-rlv3-version-matrix
+
+on:
+  push:
+    branches: [ci-rlv3-6f4a9d]
+    paths-ignore: ['ci/results/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  version-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - name: main-pinned
+            ref: d61ed07dee7e9f846b475184db29e885f4699d2a
+          - name: release-2.7.3
+            ref: release/2.7.3
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ci-rlv3-6f4a9d
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install target ${{ matrix.target.name }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgmp-dev libssl-dev pkg-config
+          git clone --filter=blob:none https://github.com/Chia-Network/chia-blockchain.git target
+          git -C target checkout '${{ matrix.target.ref }}'
+          git -C target rev-parse HEAD | tee TARGET_COMMIT.txt
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -e './target[dev]'
+          base64 -d ci/payload.gz.b64 | gzip -dc > /tmp/test_v3_wallet_unsolicited_dos.py
+      - name: Run exact payload
+        id: campaign
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}/target
+          PYTHONUNBUFFERED: '1'
+        run: |
+          set -o pipefail
+          python -m pytest -vv -s /tmp/test_v3_wallet_unsolicited_dos.py 2>&1 | tee VERSION.log
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+      - name: Stage version result
+        if: always()
+        run: |
+          mkdir -p version-results
+          {
+            echo "target=${{ matrix.target.name }}"
+            echo "ref=${{ matrix.target.ref }}"
+            echo "commit=$(cat TARGET_COMMIT.txt 2>/dev/null)"
+            echo "exit_code=${{ steps.campaign.outputs.exit_code }}"
+            grep -E 'RESULT=|CONTROL=|BYPASS=|IMPACT=|CONFIRMED|REJECTED|passed|failed|ERROR|AssertionError' VERSION.log 2>/dev/null | tail -n 180 || true
+            echo '--- tail ---'
+            tail -n 220 VERSION.log 2>/dev/null || true
+          } > version-results/${{ matrix.target.name }}.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rlv3-version-${{ matrix.target.name }}
+          path: version-results/${{ matrix.target.name }}.txt
+          retention-days: 7
+
+  publish:
+    needs: version-matrix
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ci-rlv3-6f4a9d
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rlv3-version-*
+          path: collected
+          merge-multiple: true
+      - name: Commit combined matrix
+        run: |
+          mkdir -p ci/results
+          cat collected/*.txt > ci/results/rlv3-version-matrix.txt
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ci/results/rlv3-version-matrix.txt
+          if ! git diff --cached --quiet; then
+            git commit -m 'Record isolated RLV3 version matrix [skip ci]'
+            git push origin HEAD:ci-rlv3-6f4a9d
+          fi

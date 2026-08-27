@@ -1,0 +1,77 @@
+name: isolated-chia-rlv3-campaign
+
+on:
+  push:
+    branches:
+      - ci-rlv3-6f4a9d
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-only-payload-campaign:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out harness
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install native prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgmp-dev libssl-dev pkg-config
+
+      - name: Fetch exact Chia source snapshot
+        run: |
+          git clone --filter=blob:none https://github.com/Chia-Network/chia-blockchain.git target
+          cd target
+          git checkout d61ed07dee7e9f846b475184db29e885f4699d2a
+          git rev-parse HEAD | tee ../TARGET_COMMIT.txt
+
+      - name: Install Chia development environment
+        working-directory: target
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -e '.[dev]'
+
+      - name: Decode isolated local payload campaign
+        run: |
+          base64 -d ci/payload.gz.b64 | gzip -dc > /tmp/test_v3_wallet_unsolicited_dos.py
+          python -m py_compile /tmp/test_v3_wallet_unsolicited_dos.py
+          sha256sum /tmp/test_v3_wallet_unsolicited_dos.py | tee PAYLOAD_SHA256.txt
+
+      - name: Execute against real limiter and connection state machine
+        working-directory: target
+        env:
+          PYTHONPATH: ${{ github.workspace }}/target
+          PYTHONUNBUFFERED: '1'
+        run: |
+          set -o pipefail
+          python -m pytest -vv -s /tmp/test_v3_wallet_unsolicited_dos.py 2>&1 | tee ../CAMPAIGN.log
+
+      - name: Capture exact dependency versions
+        if: always()
+        run: |
+          python -m pip freeze > DEPENDENCIES.txt
+          git -C target status --short > TARGET_STATUS.txt
+
+      - name: Upload local-only evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolated-chia-rlv3-evidence
+          path: |
+            CAMPAIGN.log
+            TARGET_COMMIT.txt
+            TARGET_STATUS.txt
+            PAYLOAD_SHA256.txt
+            DEPENDENCIES.txt
+          if-no-files-found: warn
+          retention-days: 7

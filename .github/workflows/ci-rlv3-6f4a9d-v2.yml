@@ -1,0 +1,80 @@
+name: isolated-chia-rlv3-campaign-v2
+
+on:
+  push:
+    branches:
+      - ci-rlv3-6f4a9d
+    paths-ignore:
+      - 'ci/results/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  local-only-stateful-fuzzing:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ci-rlv3-6f4a9d
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Prepare exact source and dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgmp-dev libssl-dev pkg-config
+          git clone --filter=blob:none https://github.com/Chia-Network/chia-blockchain.git target
+          git -C target checkout d61ed07dee7e9f846b475184db29e885f4699d2a
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -e './target[dev]'
+          base64 -d ci/payload.gz.b64 | gzip -dc > /tmp/test_v3_wallet_unsolicited_dos.py
+          python -m py_compile /tmp/test_v3_wallet_unsolicited_dos.py
+
+      - name: Run campaign and preserve exact outcome
+        id: campaign
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}/target
+          PYTHONUNBUFFERED: '1'
+        run: |
+          set -o pipefail
+          python -m pytest -vv -s /tmp/test_v3_wallet_unsolicited_dos.py 2>&1 | tee CAMPAIGN.log
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish machine-readable local-only result
+        if: always()
+        run: |
+          mkdir -p ci/results
+          {
+            echo "target_commit=d61ed07dee7e9f846b475184db29e885f4699d2a"
+            echo "campaign_exit_code=${{ steps.campaign.outputs.exit_code }}"
+            echo "payload_sha256=$(sha256sum /tmp/test_v3_wallet_unsolicited_dos.py 2>/dev/null | awk '{print $1}')"
+            echo "--- result markers ---"
+            grep -E 'RESULT=|CONTROL=|BYPASS=|IMPACT=|CONFIRMED|REJECTED|passed|failed|ERROR|AssertionError' CAMPAIGN.log 2>/dev/null | tail -n 160 || true
+            echo "--- tail ---"
+            tail -n 220 CAMPAIGN.log 2>/dev/null || true
+          } > ci/results/rlv3-current.txt
+
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ci/results/rlv3-current.txt
+          if ! git diff --cached --quiet; then
+            git commit -m 'Record isolated RATE_LIMITS_V3 campaign result [skip ci]'
+            git push origin HEAD:ci-rlv3-6f4a9d
+          fi
+
+      - name: Upload full evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolated-chia-rlv3-evidence-v2
+          path: |
+            CAMPAIGN.log
+            ci/results/rlv3-current.txt
+          retention-days: 7
