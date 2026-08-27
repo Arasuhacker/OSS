@@ -1,0 +1,87 @@
+name: repeat-wallet-response-check
+
+on:
+  push:
+    branches:
+      - ci-repeat-wallet-43c2e1
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout harness
+        uses: actions/checkout@v4
+
+      - name: Checkout target source
+        uses: actions/checkout@v4
+        with:
+          repository: Chia-Network/chia-blockchain
+          ref: release/2.7.3
+          path: chia-blockchain
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: chia-blockchain/pyproject.toml
+
+      - name: Install prerequisites and target
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgmp-dev
+          python -m pip install --upgrade pip
+          # Environment-only workaround: release/2.7.3 pins unavailable zstd>=1.5.7.3.
+          # No Chia networking, protocol, wallet, or rate-limit source is modified.
+          sed -i 's/zstd = ">=1.5.7.3"/zstd = ">=1.5.7.2"/' chia-blockchain/pyproject.toml
+          grep '^zstd' chia-blockchain/pyproject.toml
+          python -m pip install -e './chia-blockchain[dev]'
+
+      - name: Restore and verify payload
+        run: |
+          cat ci/repeat-payload.part* | base64 -d | gzip -dc > chia-blockchain/chia/_tests/core/server/test_isolated_compatibility.py
+          python -m py_compile chia-blockchain/chia/_tests/core/server/test_isolated_compatibility.py
+          sha256sum chia-blockchain/chia/_tests/core/server/test_isolated_compatibility.py | tee payload.sha256
+          test "$(cut -d' ' -f1 payload.sha256)" = "d19f48edb31e529f514f0723e8f7cabd014739bc0755a94fdd18da417583829d"
+
+      - name: Execute repeated local-only proof
+        shell: bash
+        run: |
+          set -o pipefail
+          cd chia-blockchain
+          /usr/bin/time -v python -m pytest -s -vv -n 0 \
+            chia/_tests/core/server/test_isolated_compatibility.py \
+            --tb=short 2>&1 | tee ../results.log
+
+      - name: Record environment
+        if: always()
+        run: |
+          {
+            echo "target_branch=release/2.7.3"
+            echo "target_commit=$(git -C chia-blockchain rev-parse HEAD)"
+            echo "environment_only_change=zstd floor 1.5.7.3 -> 1.5.7.2"
+            echo "python=$(python --version 2>&1)"
+            python - <<'PY'
+          import importlib.metadata
+          print(f"chia_rs={importlib.metadata.version('chia_rs')}")
+          PY
+          } | tee environment.log
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-repeat-wallet-results
+          path: |
+            results.log
+            environment.log
+            payload.sha256
+            chia-blockchain/chia/_tests/core/server/test_isolated_compatibility.py
+          if-no-files-found: warn
